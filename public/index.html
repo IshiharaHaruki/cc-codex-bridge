@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>CC ⇄ Codex Bridge</title>
+<style>
+  :root { color-scheme: light dark; }
+  * { box-sizing: border-box; }
+  body { font: 15px/1.5 -apple-system, system-ui, sans-serif; margin: 0; padding: 24px;
+    max-width: 860px; margin-inline: auto; }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  .sub { color: #888; font-size: 13px; margin-bottom: 16px; }
+  .row { display: flex; gap: 8px; margin-bottom: 12px; }
+  select, button, textarea { font: inherit; padding: 9px 12px; border-radius: 8px;
+    border: 1px solid #8884; background: transparent; color: inherit; }
+  textarea { flex: 1; resize: vertical; min-height: 64px; }
+  button { cursor: pointer; background: #2563eb; color: #fff; border: none; padding-inline: 18px; }
+  button:disabled { opacity: .5; cursor: default; }
+  select { min-width: 150px; }
+  #log { border: 1px solid #8883; border-radius: 10px; padding: 14px; min-height: 200px;
+    white-space: pre-wrap; word-break: break-word; }
+  .msg { margin-bottom: 14px; }
+  .who { font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .04em;
+    color: #888; margin-bottom: 2px; }
+  .claude .who { color: #c2682b; }
+  .codex .who { color: #2b7d6b; }
+  .tool { font-size: 12px; color: #888; border-left: 2px solid #8884; padding-left: 8px;
+    margin: 6px 0; white-space: pre-wrap; }
+  .err { color: #e23; }
+</style>
+</head>
+<body>
+  <h1>CC ⇄ Codex Bridge</h1>
+  <div class="sub" id="cwd">localhost MVP · Claude Agent SDK ⇄ Codex app-server</div>
+
+  <div class="row">
+    <select id="agent">
+      <option value="claude">Ask Claude (can delegate → Codex)</option>
+      <option value="codex">Ask Codex (can ask → Claude)</option>
+    </select>
+  </div>
+  <div class="row">
+    <textarea id="prompt" placeholder="输入你的任务… 例：让 Codex 审一下 src/codex-client.ts 的健壮性"></textarea>
+  </div>
+  <div class="row">
+    <button id="send">发送</button>
+  </div>
+
+  <div id="log"></div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const log = $("log");
+
+function block(agent) {
+  const wrap = document.createElement("div");
+  wrap.className = "msg " + agent;
+  const who = document.createElement("div");
+  who.className = "who";
+  who.textContent = agent;
+  const body = document.createElement("span");
+  wrap.append(who, body);
+  log.append(wrap);
+  log.scrollTop = log.scrollHeight;
+  return body;
+}
+
+function note(parent, text, cls) {
+  const n = document.createElement("div");
+  n.className = cls || "tool";
+  n.textContent = text;
+  parent.parentElement.append(n);
+  log.scrollTop = log.scrollHeight;
+}
+
+async function send() {
+  const agent = $("agent").value;
+  const prompt = $("prompt").value.trim();
+  if (!prompt) return;
+  $("send").disabled = true;
+  $("prompt").value = "";
+
+  const you = block("you");
+  you.textContent = prompt;
+
+  const body = block(agent);
+  try {
+    const resp = await fetch("/api/ask", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ agent, prompt }),
+    });
+    const reader = resp.body.getReader();
+    const dec = new TextDecoder();
+    let buf = "";
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      const lines = buf.split("\n");
+      buf = lines.pop();
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        const ev = JSON.parse(line);
+        if (ev.type === "text") body.textContent += ev.data;
+        else if (ev.type === "reasoning") { /* ignore reasoning in MVP */ }
+        else if (ev.type === "tool_call")
+          note(body, `→ calling ${ev.data.tool}(${JSON.stringify(ev.data.args)})`);
+        else if (ev.type === "tool_result")
+          note(body, `← ${ev.data.tool} returned ${ev.data.text.length} chars`);
+        else if (ev.type === "error") note(body, "ERROR: " + ev.data, "tool err");
+        log.scrollTop = log.scrollHeight;
+      }
+    }
+  } catch (e) {
+    note(body, "REQUEST FAILED: " + e, "tool err");
+  } finally {
+    $("send").disabled = false;
+  }
+}
+
+$("send").addEventListener("click", send);
+$("prompt").addEventListener("keydown", (e) => {
+  if ((e.metaKey || e.ctrlKey) && e.key === "Enter") send();
+});
+</script>
+</body>
+</html>
