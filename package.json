@@ -5,8 +5,11 @@
   "type": "module",
   "description": "Minimal localhost bridge: Claude Agent SDK <-> Codex app-server, bidirectional, user-triggered.",
   "scripts": {
+    "codex:protocol": "codex app-server generate-ts --out src/codex-protocol --experimental",
+    "predev": "test -d src/codex-protocol || npm run codex:protocol",
     "dev": "tsx src/server.ts",
-    "codex:protocol": "codex app-server generate-ts --out src/codex-protocol --experimental"
+    "pretypecheck": "test -d src/codex-protocol || npm run codex:protocol",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.177",
